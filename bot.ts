@@ -3,7 +3,7 @@
 // Юзеры (вайтлист): свои конфиги, создают сами.
 // Бот на голландском, правит wg0.conf на российском через SSH.
 
-const TOKEN = Deno.env.get("WG_BOT_TOKEN") ?? "8841845670:AAHevInN4RanSJhX_unClftwelH7Ge4kdws";
+const TOKEN = Deno.env.get("WG_BOT_TOKEN") ?? "";
 const ADMIN_ID = Number(Deno.env.get("WG_BOT_ADMIN") ?? "293556094");
 const DATA_DIR = Deno.env.get("WG_BOT_DATA") ?? "/opt/wg-bot";
 const SERVER_ENDPOINT = Deno.env.get("WG_ENDPOINT") ?? "46.8.29.95:51820";
@@ -17,12 +17,12 @@ const WHITELIST_FILE = `${DATA_DIR}/whitelist.json`;
 const CLIENTS_FILE = `${DATA_DIR}/clients.json`;
 const NAMES_FILE = `${DATA_DIR}/names.json`;
 const REQUESTS_FILE = `${DATA_DIR}/requests.json`;
-const SERVER_PUBKEY = "jXqWMqih1ydsHmDsfYlv7M2TjvtsPFTpPV1hrspGUnw=";
+const SERVER_PUBKEY = Deno.env.get("WG_SERVER_PUBKEY") ?? "";
 
 // ---- Shadowsocks резервный канал (46.8.29.95:8388, контейнер ss-reserve) ----
-const SS_ENDPOINT = "46.8.29.95";
-const SS_PORT = "8388";
-const SS_PASSWORD = "fOd3pCB3O4ytZiTDs7RD";
+const SS_ENDPOINT = Deno.env.get("SS_HOST") ?? "";
+const SS_PORT = Deno.env.get("SS_PORT") ?? "8388";
+const SS_PASSWORD = Deno.env.get("SS_PASSWORD") ?? "";
 const SS_METHOD = "chacha20-ietf-poly1305";
 // Полная ss:// ссылка для раздачи (метод:пароль@хост:порт#Имя)
 function ssLink(name: string): string {
@@ -119,7 +119,7 @@ function setUserName(id: number, name: string) {
 
 // ---- Пиры ----
 const WG0_SERVER_PRIV = Deno.env.get("WG_SERVER_PRIVKEY") ?? ""; // приватный ключ wg0 (из env)
-const WG0_SERVER_PUB = "jXqWMqih1ydsHmDsfYlv7M2TjvtsPFTpPV1hrspGUnw=";
+const WG0_SERVER_PUB = Deno.env.get("WG_SERVER_PUBKEY") ?? "";
 // MTU серверного интерфейса wg0. Клиенты — двойной туннель (wg0 поверх wg1 с MTU 1360),
 // поэтому 1360 — проверенное рабочее значение. Должно быть в КАЖДОЙ записи конфига,
 // иначе после рестарта wg0 MTU слетает на дефолт 1420 → фрагментация.
