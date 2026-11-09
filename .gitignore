@@ -1,0 +1,7 @@
+.env
+*.key
+wg0.tmp
+*.bak-*
+Тесе.ss
+тест.ss
+test.ss
