@@ -3,11 +3,7 @@
 // Юзеры (вайтлист): свои конфиги, создают сами.
 // Бот на голландском, правит wg0.conf на российском через SSH.
 
-const TOKEN = Deno.env.get("WG_BOT_TOKEN") ?? "";
-if (!TOKEN) {
-  console.error("WG_BOT_TOKEN не задан — создай .env по образцу .env.example");
-  Deno.exit(1);
-}
+const TOKEN = Deno.env.get("WG_BOT_TOKEN") ?? "8841845670:AAHevInN4RanSJhX_unClftwelH7Ge4kdws";
 const ADMIN_ID = Number(Deno.env.get("WG_BOT_ADMIN") ?? "293556094");
 const DATA_DIR = Deno.env.get("WG_BOT_DATA") ?? "/opt/wg-bot";
 const SERVER_ENDPOINT = Deno.env.get("WG_ENDPOINT") ?? "46.8.29.95:51820";
@@ -21,13 +17,13 @@ const WHITELIST_FILE = `${DATA_DIR}/whitelist.json`;
 const CLIENTS_FILE = `${DATA_DIR}/clients.json`;
 const NAMES_FILE = `${DATA_DIR}/names.json`;
 const REQUESTS_FILE = `${DATA_DIR}/requests.json`;
-const SERVER_PUBKEY = Deno.env.get("WG_SERVER_PUBKEY") ?? "";
+const SERVER_PUBKEY = "jXqWMqih1ydsHmDsfYlv7M2TjvtsPFTpPV1hrspGUnw=";
 
 // ---- Shadowsocks резервный канал (46.8.29.95:8388, контейнер ss-reserve) ----
-const SS_ENDPOINT = Deno.env.get("SS_HOST") ?? "46.8.29.95";
-const SS_PORT = Deno.env.get("SS_PORT") ?? "8388";
-const SS_PASSWORD = Deno.env.get("SS_PASSWORD") ?? "";
-const SS_METHOD = Deno.env.get("SS_METHOD") ?? "chacha20-ietf-poly1305";
+const SS_ENDPOINT = "46.8.29.95";
+const SS_PORT = "8388";
+const SS_PASSWORD = "fOd3pCB3O4ytZiTDs7RD";
+const SS_METHOD = "chacha20-ietf-poly1305";
 // Полная ss:// ссылка для раздачи (метод:пароль@хост:порт#Имя)
 function ssLink(name: string): string {
   const userinfo = btoa(`${SS_METHOD}:${SS_PASSWORD}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -122,27 +118,30 @@ function setUserName(id: number, name: string) {
 }
 
 // ---- Пиры ----
-const WG0_SERVER_PRIV = "sBH185vZuqJmuvqokZ2jKgl/2S8ZFrmymxxYKfhANFI="; // private key wg0 на российской
-const WG0_SERVER_PUB = Deno.env.get("WG_SERVER_PUBKEY") ?? "";
+const WG0_SERVER_PRIV = Deno.env.get("WG_SERVER_PRIVKEY") ?? ""; // приватный ключ wg0 (из env)
+const WG0_SERVER_PUB = "jXqWMqih1ydsHmDsfYlv7M2TjvtsPFTpPV1hrspGUnw=";
 // MTU серверного интерфейса wg0. Клиенты — двойной туннель (wg0 поверх wg1 с MTU 1360),
 // поэтому 1360 — проверенное рабочее значение. Должно быть в КАЖДОЙ записи конфига,
 // иначе после рестарта wg0 MTU слетает на дефолт 1420 → фрагментация.
-const WG0_MTU = "1360";
+const WG0_MTU = Deno.env.get("WG_MTU") ?? "1420";
 // PostUp обязателен: поднимает маршрут 10.9.0.0/24 dev wg0 в таблице wgclients
 // (wg1-up.sh, идемпотентно). Без него после рестарта wg0 DNS-запросы клиентов
 // уходят в Голландию и VPN «не грузит» интернет.
-const WG0_POSTUP = "/usr/local/bin/wg1-up.sh";
+const WG0_POSTUP = Deno.env.get("WG_POSTUP") ?? ""; // пусто = PostUp не пишем
 // Единый заголовок [Interface] для wg0 — во всех трёх местах записи конфига,
 // чтобы MTU и PostUp никогда не терялись при перезаписи файла ботом.
 function serverInterfaceHeader(): string {
-  return `[Interface]\nAddress = 10.9.0.1/24\nListenPort = 51820\nPrivateKey = ${WG0_SERVER_PRIV}\nMTU = ${WG0_MTU}\nSaveConfig = false\nPostUp = ${WG0_POSTUP}\n`;
+  const postUp = WG0_POSTUP ? `PostUp = ${WG0_POSTUP}\n` : "";
+  return `[Interface]\nAddress = 10.9.0.1/24\nListenPort = 51820\nPrivateKey = ${WG0_SERVER_PRIV}\nMTU = ${WG0_MTU}\nSaveConfig = false\n${postUp}`;
 }
 function ensureHeader(header: string): string {
   if (header.includes("[Interface]") && header.includes("PrivateKey")) {
     // Дополняем недостающими критичными строками, если их нет (старые конфиги).
     let h = header;
     if (!/^MTU\s*=/m.test(h)) h = h.replace(/^(PrivateKey\s*=.*)$/m, `$1\nMTU = ${WG0_MTU}`);
-    if (!/^PostUp\s*=/m.test(h)) h = h.replace(/^(SaveConfig\s*=.*)$/m, `$1\nPostUp = ${WG0_POSTUP}`);
+    if (WG0_POSTUP && !/^PostUp\s*=/m.test(h)) h = h.replace(/^(SaveConfig\s*=.*)$/m, `$1\nPostUp = ${WG0_POSTUP}`);
+    // чужой PostUp от старого сервера — вычищаем
+    h = h.split("\n").filter((l) => !(l.startsWith("PostUp") && WG0_POSTUP && !l.includes(WG0_POSTUP))).join("\n");
     return h.endsWith("\n") ? h : h + "\n";
   }
   return serverInterfaceHeader();
