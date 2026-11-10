@@ -12,7 +12,7 @@ const WG_USER = "root";
 const WG_CONF_REMOTE = "/etc/amnezia/amneziawg/awg0.conf";
 const DNS = "1.1.1.1";
 const MTU = "1420";
-const AWG = { Jc: "8", Jmin: "31", Jmax: "128", S1: "25", S2: "22", H1: "103572000", H2: "104572000", H3: "105572000", H4: "106572000" };
+const AWG = { Jc: "4", Jmin: "40", Jmax: "70", S1: "48", S2: "32", H1: "1234567891", H2: "1234567892", H3: "1234567893", H4: "1234567894" };
 const AWG_BLOCK = `Jc = ${AWG.Jc}\nJmin = ${AWG.Jmin}\nJmax = ${AWG.Jmax}\nS1 = ${AWG.S1}\nS2 = ${AWG.S2}\nH1 = ${AWG.H1}\nH2 = ${AWG.H2}\nH3 = ${AWG.H3}\nH4 = ${AWG.H4}`;
 const API = `https://api.telegram.org/bot${TOKEN}`;
 const WHITELIST_FILE = `${DATA_DIR}/whitelist.json`;
@@ -284,13 +284,50 @@ async function editMsg(chatId: number, msgId: number, text: string, extra: Recor
 
 // ---- Клавиатуры ----
 // Админ: все кнопки
+
+const HELP_TEXT = `❓ *ПОМОЩЬ*
+
+*Как подключиться*
+1️⃣ Нажми «➕ Создать конфиг»
+2️⃣ Выбери протокол (AmneziaWG — основной)
+3️⃣ Введи название (например: iPhone)
+4️⃣ Бот пришлёт конфиг и QR-код
+5️⃣ Скачай приложение AmneziaWG и импортируй конфиг
+6️⃣ Включи туннель
+
+*Где взять приложение*
+• iPhone / iPad — AmneziaWG в App Store
+• Android — AmneziaWG в Play Маркет
+• Mac — AmneziaWG в App Store
+• Windows — с сайта amnezia.org
+
+*Не работает интернет при включённом VPN*
+1. Выключи VPN, включи заново
+2. Переключись между Wi-Fi и мобильным интернетом
+3. Удали конфиг и создай новый в боте
+4. Если не помогло — напиши админу
+
+*Не открывается Telegram*
+Нажми «📡 Telegram-прокси» в меню — это отдельный прокси, работает даже когда VPN не поднят.
+
+*Что выбрать: AmneziaWG или Shadowsocks*
+• AmneziaWG — обычный вариант, работает у большинства
+• Shadowsocks — если оператор блокирует по белым спискам (часто на мобильном интернете)
+
+*Нужна помощь человека*
+Напиши админу: @vladisa_s`;
+
+const HELP_KB = {
+  inline_keyboard: [[{ text: "✉️ Написать админу", url: "https://t.me/vladisa_s" }]],
+};
+
 const MAIN_MENU = {
-  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["✉️ Сообщение"], ["📡 Telegram-прокси"], ["⚠️ Важно"]] ,
+  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["✉️ Сообщение"], ["📡 Telegram-прокси"], ["❓ Помощь", "⚠️ Важно"]] ,
   resize_keyboard: true, is_persistent: true,
 };
 // Юзер: без «Пользователи» (только свои конфиги и создание)
 const USER_MENU = {
-  keyboard: [["📋 Конфиги"], ["➕ Создать конфиг"], ["📡 Telegram-прокси"], ["⚠️ Важно"]],
+  keyboard: [["📋 Конфиги"], ["➕ Создать конфиг"], ["📡 Telegram-прокси"], ["❓ Помощь", "⚠️ Важно"]],
   resize_keyboard: true, is_persistent: true,
 };
 
@@ -628,6 +665,7 @@ async function handleText(uid: number, chatId: number, text: string, firstName?:
   if (text === "👥 Пользователи") return showUsers(uid, chatId);
   if (text === "✉️ Сообщение") return showMsgTargets(uid, chatId);
   if (text === "📋 Конфиги") return showConfigs(uid, chatId);
+  if (text === "❓ Помощь") { clearState(chatId); return sendMessage(chatId, HELP_TEXT, { parse_mode: "Markdown", disable_web_page_preview: true, reply_markup: HELP_KB }); }
   if (text === "⚠️ Важно") { clearState(chatId); return sendMessage(chatId, INFO_TEXT, { parse_mode: "Markdown", disable_web_page_preview: true }); }
   if (text === "📡 Telegram-прокси") { clearState(chatId); return sendMessage(chatId, TELEGRAM_PROXY_TEXT, { parse_mode: "Markdown", reply_markup: TELEGRAM_PROXY_KB }); }
 
