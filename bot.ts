@@ -295,49 +295,13 @@ async function editMsg(chatId: number, msgId: number, text: string, extra: Recor
 // ---- Клавиатуры ----
 // Админ: все кнопки
 
-const HELP_TEXT = `❓ *ПОМОЩЬ*
-
-*Как подключиться*
-1️⃣ Нажми «➕ Создать конфиг»
-2️⃣ Выбери протокол (AmneziaWG — основной)
-3️⃣ Введи название (например: iPhone)
-4️⃣ Бот пришлёт конфиг и QR-код
-5️⃣ Скачай приложение AmneziaWG и импортируй конфиг
-6️⃣ Включи туннель
-
-*Где взять приложение*
-• iPhone / iPad — AmneziaWG в App Store
-• Android — AmneziaWG в Play Маркет
-• Mac — AmneziaWG в App Store
-• Windows — с сайта amnezia.org
-
-*Не работает интернет при включённом VPN*
-1. Выключи VPN, включи заново
-2. Переключись между Wi-Fi и мобильным интернетом
-3. Удали конфиг и создай новый в боте
-4. Если не помогло — напиши админу
-
-*Не открывается Telegram*
-Нажми «📡 Telegram-прокси» в меню — это отдельный прокси, работает даже когда VPN не поднят.
-
-*Что выбрать: AmneziaWG или Shadowsocks*
-• AmneziaWG — обычный вариант, работает у большинства
-• Shadowsocks — если оператор блокирует по белым спискам (часто на мобильном интернете)
-
-*Нужна помощь человека*
-Напиши админу: @vladisa_s`;
-
-const HELP_KB = {
-  inline_keyboard: [[{ text: "✉️ Написать админу (тикет)", callback_data: "newticket" }]],
-};
-
 const MAIN_MENU = {
-  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["✉️ Сообщение"], ["📡 Telegram-прокси"], ["🛜 Роутер", "❓ Помощь"], ["🆘 Поддержка"], ["⚠️ Важно"]] ,
+  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["✉️ Сообщение"], ["📡 Telegram-прокси"], ["🛜 Роутер", "🆘 Поддержка"], ["⚠️ Важно"]] ,
   resize_keyboard: true, is_persistent: true,
 };
 // Юзер: без «Пользователи» (только свои конфиги и создание)
 const USER_MENU = {
-  keyboard: [["📋 Конфиги"], ["➕ Создать конфиг"], ["📡 Telegram-прокси"], ["🛜 Роутер", "❓ Помощь"], ["🆘 Поддержка"], ["⚠️ Важно"]],
+  keyboard: [["📋 Конфиги"], ["➕ Создать конфиг"], ["📡 Telegram-прокси"], ["🛜 Роутер", "🆘 Поддержка"], ["⚠️ Важно"]],
   resize_keyboard: true, is_persistent: true,
 };
 
@@ -854,7 +818,6 @@ async function handleText(uid: number, chatId: number, text: string, firstName?:
     if (uid === ADMIN_ID) return showTickets(uid, chatId);
     return beginTicket(uid, chatId);
   }
-  if (text === "❓ Помощь") { clearState(chatId); return sendMessage(chatId, HELP_TEXT, { parse_mode: "Markdown", disable_web_page_preview: true, reply_markup: HELP_KB }); }
   if (text === "⚠️ Важно") { clearState(chatId); return sendMessage(chatId, INFO_TEXT, { parse_mode: "Markdown", disable_web_page_preview: true }); }
   if (text === "📡 Telegram-прокси") { clearState(chatId); return sendMessage(chatId, TELEGRAM_PROXY_TEXT, { parse_mode: "Markdown", reply_markup: TELEGRAM_PROXY_KB }); }
 
