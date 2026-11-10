@@ -1,14 +1,21 @@
 [Unit]
-Description=WireGuard Telegram Bot
-After=network.target
+Description=AmneziaWG Telegram Bot (Romania)
+After=network.target awg-quick@awg0.service
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/wg-bot
-EnvironmentFile=/opt/wg-bot/.env
-ExecStart=/usr/bin/env deno run --allow-all /opt/wg-bot/bot.ts
+ExecStart=/root/.deno/bin/deno run --allow-all /opt/wg-bot/bot.ts
 Restart=always
 RestartSec=5
+Environment=WG_BOT_TOKEN=
+Environment=WG_BOT_ADMIN=293556094
+Environment=WG_SSH_HOST=127.0.0.1
+Environment=WG_ENDPOINT=178.214.211.135:46879
+Environment=WG_SERVER_PRIVKEY=
+Environment=WG_SERVER_PUB=oq6RmahE4n2jwaRXDTe2g6Bbo4lGpaw1/i7VlkAiHkM=
+Environment=WG_PSK=
+Environment=WG_POSTUP=
 
 [Install]
 WantedBy=multi-user.target

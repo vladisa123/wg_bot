@@ -1,4 +1,4 @@
-// WireGuard Telegram Bot v3 — простая модель состояний
+// AmneziaWG Telegram Bot v3 — простая модель состояний
 // Админ: Пользователи / Конфиги / Создать конфиг
 // Юзеры (вайтлист): свои конфиги, создают сами.
 // Бот на голландском, правит wg0.conf на российском через SSH.
@@ -6,34 +6,38 @@
 const TOKEN = Deno.env.get("WG_BOT_TOKEN") ?? "";
 const ADMIN_ID = Number(Deno.env.get("WG_BOT_ADMIN") ?? "293556094");
 const DATA_DIR = Deno.env.get("WG_BOT_DATA") ?? "/opt/wg-bot";
-const SERVER_ENDPOINT = Deno.env.get("WG_ENDPOINT") ?? "46.8.29.95:51820";
-const WG_HOST = Deno.env.get("WG_SSH_HOST") ?? "46.8.29.95";
+const SERVER_ENDPOINT = Deno.env.get("WG_ENDPOINT") ?? "178.214.211.135:46879";
+const WG_HOST = Deno.env.get("WG_SSH_HOST") ?? "127.0.0.1";
 const WG_USER = "root";
-const WG_CONF_REMOTE = "/etc/wireguard/wg0.conf";
-const DNS = "10.9.0.1";
-const MTU = "1360";
+const WG_CONF_REMOTE = "/etc/amnezia/amneziawg/awg0.conf";
+const DNS = "1.1.1.1";
+const MTU = "1420";
+const AWG = { Jc: "8", Jmin: "31", Jmax: "128", S1: "25", S2: "22", H1: "103572000", H2: "104572000", H3: "105572000", H4: "106572000" };
+const AWG_BLOCK = `Jc = ${AWG.Jc}\nJmin = ${AWG.Jmin}\nJmax = ${AWG.Jmax}\nS1 = ${AWG.S1}\nS2 = ${AWG.S2}\nH1 = ${AWG.H1}\nH2 = ${AWG.H2}\nH3 = ${AWG.H3}\nH4 = ${AWG.H4}`;
 const API = `https://api.telegram.org/bot${TOKEN}`;
 const WHITELIST_FILE = `${DATA_DIR}/whitelist.json`;
 const CLIENTS_FILE = `${DATA_DIR}/clients.json`;
 const NAMES_FILE = `${DATA_DIR}/names.json`;
 const REQUESTS_FILE = `${DATA_DIR}/requests.json`;
-const SERVER_PUBKEY = Deno.env.get("WG_SERVER_PUBKEY") ?? "";
+const SERVER_PUBKEY = Deno.env.get("WG_SERVER_PUB") ?? "oq6RmahE4n2jwaRXDTe2g6Bbo4lGpaw1/i7VlkAiHkM=";
+const PSK = Deno.env.get("WG_PSK") ?? "";
 
 // ---- Shadowsocks резервный канал (46.8.29.95:8388, контейнер ss-reserve) ----
-const SS_ENDPOINT = Deno.env.get("SS_HOST") ?? "";
-const SS_PORT = Deno.env.get("SS_PORT") ?? "8388";
-const SS_PASSWORD = Deno.env.get("SS_PASSWORD") ?? "";
+const SS_ENDPOINT = "46.8.29.95";
+const SS_PORT = "8388";
+const SS_PASSWORD = "fOd3pCB3O4ytZiTDs7RD";
 const SS_METHOD = "chacha20-ietf-poly1305";
 // Полная ss:// ссылка для раздачи (метод:пароль@хост:порт#Имя)
 function ssLink(name: string): string {
   const userinfo = btoa(`${SS_METHOD}:${SS_PASSWORD}`).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   return `ss://${userinfo}@${SS_ENDPOINT}:${SS_PORT}#${encodeURIComponent(name)}`;
 }
-function protoLabel(proto?: string): string { return proto === "shadowsocks" ? "🔒 Shadowsocks (белые списки)" : "🛡 WireGuard"; }
+function protoLabel(proto?: string): string { return proto === "shadowsocks" ? "🔒 Shadowsocks (белые списки)" : "🛡 AmneziaWG"; }
 
 // ---- Состояния (чат -> {mode}) ----
-// mode: none | waiting_new_name | waiting_add_user
-// Для waiting_new_name: { mode, uid }  (uid — для кого конфиг)
+// mode: none | waiting_new_proto | waiting_new_name | waiting_add_user
+// waiting_new_proto: { mode, uid, targetUid } — выбран протокол, ждём имя
+// waiting_new_name: { mode, uid, targetUid, proto }
 // Для waiting_add_user: { mode }
 const states: Record<number, any> = {};
 function setState(chatId: number, s: any) { states[chatId] = s; }
@@ -92,7 +96,7 @@ function writeRemoteConf(c: string): boolean {
 function remoteApply(): boolean {
   // Применяем текущий wg0.conf к интерфейсу. Избегаем bash-специфики <() —
   // используем wg-quick strip и применяем через временный файл/поток.
-  const ok = sshRun(`wg-quick strip wg0 > /tmp/wg0.strip && wg syncconf wg0 /tmp/wg0.strip && rm -f /tmp/wg0.strip`);
+  const ok = sshRun(`awg-quick strip awg0 > /tmp/awg0.strip && awg syncconf awg0 /tmp/awg0.strip && rm -f /tmp/awg0.strip `);
   return ok.ok;
 }
 function getServerPubkey(): string { return SERVER_PUBKEY; }
@@ -119,12 +123,12 @@ function setUserName(id: number, name: string) {
 
 // ---- Пиры ----
 const WG0_SERVER_PRIV = Deno.env.get("WG_SERVER_PRIVKEY") ?? ""; // приватный ключ wg0 (из env)
-const WG0_SERVER_PUB = Deno.env.get("WG_SERVER_PUBKEY") ?? "";
+const WG0_SERVER_PUB = "jXqWMqih1ydsHmDsfYlv7M2TjvtsPFTpPV1hrspGUnw=";
 // MTU серверного интерфейса wg0. Клиенты — двойной туннель (wg0 поверх wg1 с MTU 1360),
 // поэтому 1360 — проверенное рабочее значение. Должно быть в КАЖДОЙ записи конфига,
 // иначе после рестарта wg0 MTU слетает на дефолт 1420 → фрагментация.
 const WG0_MTU = Deno.env.get("WG_MTU") ?? "1420";
-// PostUp обязателен: поднимает маршрут 10.9.0.0/24 dev wg0 в таблице wgclients
+// PostUp: MASQUERADE для подсети AmneziaWG
 // (wg1-up.sh, идемпотентно). Без него после рестарта wg0 DNS-запросы клиентов
 // уходят в Голландию и VPN «не грузит» интернет.
 const WG0_POSTUP = Deno.env.get("WG_POSTUP") ?? ""; // пусто = PostUp не пишем
@@ -132,7 +136,7 @@ const WG0_POSTUP = Deno.env.get("WG_POSTUP") ?? ""; // пусто = PostUp не 
 // чтобы MTU и PostUp никогда не терялись при перезаписи файла ботом.
 function serverInterfaceHeader(): string {
   const postUp = WG0_POSTUP ? `PostUp = ${WG0_POSTUP}\n` : "";
-  return `[Interface]\nAddress = 10.9.0.1/24\nListenPort = 51820\nPrivateKey = ${WG0_SERVER_PRIV}\nMTU = ${WG0_MTU}\nSaveConfig = false\n${postUp}`;
+  return `[Interface]\nAddress = 10.77.77.1/24\nListenPort = 46879\nPrivateKey = ${WG0_SERVER_PRIV}\n${AWG_BLOCK}\n${postUp}`;
 }
 function ensureHeader(header: string): string {
   if (header.includes("[Interface]") && header.includes("PrivateKey")) {
@@ -146,10 +150,10 @@ function ensureHeader(header: string): string {
   }
   return serverInterfaceHeader();
 }
-// Читаем пиры ИЗ ПАМЯТИ сервера (wg show wg0 dump) — это источник истины, никогда не "забывает" реально работающие пиры.
+// Читаем пиры ИЗ ПАМЯТИ сервера (awg show awg0 dump) — это источник истины, никогда не "забывает" реально работающие пиры.
 // wg dump:  tab-separated: pubkey	presharedkey	endpoint	allowed-ips	latest-handshake	transfer-rx	transfer-tx	persistent-keepalive
 function readPeersFromMemory(): { pub: string; ip: string; name?: string }[] {
-  const r = sshRun(`wg show wg0 dump | tail -n +2`);
+  const r = sshRun(`awg show awg0 dump | tail -n +2`);
   if (!r.ok) return [];
   const out: { pub: string; ip: string; name?: string }[] = [];
   for (const line of r.out.split("\n")) {
@@ -188,7 +192,7 @@ function upsertPeerRemote(name: string, pub: string, ip: string): boolean {
   // Собираем конфиг
   let conf = serverInterfaceHeader();
   for (const [pk, v] of merged) {
-    conf += `\n[Peer]\n${v.name ? `# ${v.name}\n` : ""}PublicKey = ${pk}\nAllowedIPs = ${v.ip}/32\n`;
+    conf += `\n[Peer]\n${v.name ? `# ${v.name}\n` : ""}PublicKey = ${pk}\nPresharedKey = ${PSK}\nAllowedIPs = ${v.ip}/32\n`;
   }
   if (!writeRemoteConf(conf)) return false;
   if (!remoteApply()) return false;
@@ -229,7 +233,7 @@ function removePeerRemote(name: string, pub?: string): boolean {
   merged.delete(targetPub);
   let conf = serverInterfaceHeader();
   for (const [pk, v] of merged) {
-    conf += `\n[Peer]\n${v.name ? `# ${v.name}\n` : ""}PublicKey = ${pk}\nAllowedIPs = ${v.ip}/32\n`;
+    conf += `\n[Peer]\n${v.name ? `# ${v.name}\n` : ""}PublicKey = ${pk}\nPresharedKey = ${PSK}\nAllowedIPs = ${v.ip}/32\n`;
   }
   writeRemoteConf(conf);
   return remoteApply();
@@ -237,7 +241,7 @@ function removePeerRemote(name: string, pub?: string): boolean {
 function nextFreeIp(clients: Record<string, any>): string {
   const used = new Set<number>([1]);
   for (const c of Object.values(clients)) { const l = Number(c.ip?.split(".")[3]); if (!isNaN(l)) used.add(l); }
-  for (let i = 2; i < 255; i++) if (!used.has(i)) return `10.9.0.${i}`;
+  for (let i = 2; i < 255; i++) if (!used.has(i)) return `10.77.77.${i}`;
   throw new Error("Нет свободных IP");
 }
 function isValidIp(s: string): boolean {
@@ -246,14 +250,14 @@ function isValidIp(s: string): boolean {
   return m.slice(1).every((o) => Number(o) <= 255);
 }
 async function genKeypair(): Promise<{ priv: string; pub: string }> {
-  const priv = new TextDecoder().decode(new Deno.Command("wg", { args: ["genkey"], stdout: "piped" }).outputSync().stdout).trim();
-  const proc = new Deno.Command("wg", { args: ["pubkey"], stdin: "piped", stdout: "piped" }).spawn();
+  const priv = new TextDecoder().decode(new Deno.Command("awg", { args: ["genkey"], stdout: "piped" }).outputSync().stdout).trim();
+  const proc = new Deno.Command("awg", { args: ["pubkey"], stdin: "piped", stdout: "piped" }).spawn();
   const w = proc.stdin.getWriter(); w.write(new TextEncoder().encode(priv + "\n")); w.close();
   const out = await proc.output();
   return { priv, pub: new TextDecoder().decode(out.stdout).trim() };
 }
 function clientConf(name: string, ip: string, priv: string, sp: string): string {
-  return `[Interface]\nAddress = ${ip}/32\nPrivateKey = ${priv}\nDNS = ${DNS}\nMTU = ${MTU}\n\n[Peer]\nPublicKey = ${sp}\nAllowedIPs = 0.0.0.0/0\nEndpoint = ${SERVER_ENDPOINT}\nPersistentKeepalive = 25\n`;
+  return `[Interface]\nPrivateKey = ${priv}\nAddress = ${ip}/32\nDNS = ${DNS}\n${AWG_BLOCK}\n\n[Peer]\nPublicKey = ${sp}\nPresharedKey = ${PSK}\nEndpoint = ${SERVER_ENDPOINT}\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25\n`;
 }
 
 // ---- Telegram API ----
@@ -295,19 +299,19 @@ const TELEGRAM_PROXY_KB = { inline_keyboard: [[{ text: "🔌 Подключит�
 const INFO_TEXT = `⚠️ *ВАЖНАЯ ИНФОРМАЦИЯ*
 
 🛡 *Протоколы:*
-• *WireGuard* — основной, для дома и стабильного интернета
+• *AmneziaWG* — основной (обход DPI), для дома и мобильного интернета
 • *Shadowsocks* — для случая, когда оператор блокирует трафик по белым спискам IP (особенно на мобильном интернете / LTE)
 
 📱 *Какие приложения скачать:*
-• *iPhone / iPad*: WireGuard или [OneClick](https://apps.apple.com/ru/app/oneclick-safe-easy-fast/id1545555197) (Shadowsocks) из App Store
-• *Android*: WireGuard или Shadowsocks из Play Маркет
-• *Mac*: WireGuard (App Store) или ShadowsocksX-NG
+• *iPhone / iPad*: AmneziaWG или [OneClick](https://apps.apple.com/ru/app/oneclick-safe-easy-fast/id1545555197) (Shadowsocks) из App Store
+• *Android*: AmneziaWG или Shadowsocks из Play Маркет
+• *Mac*: AmneziaWG (App Store) или ShadowsocksX-NG
 
 📡 *Если не работает Telegram:*
 Когда всё работает, а Telegram нет — нажми «📡 Telegram-прокси» в меню и подключись через него (отдельная кнопка).
 
 🔒 *Про белые списки:*
-Если оператор/провайдер блокирует трафик по белым спискам IP — WireGuard может не работать. Тогда создай конфиг Shadowsocks и переключись на него.
+Если оператор/провайдер блокирует трафик по белым спискам IP — AmneziaWG может не работать. Тогда создай конфиг Shadowsocks и переключись на него.
 
 Подключение: скачай приложение → отсканируй QR / вставь конфиг → включи.`;
 
@@ -357,18 +361,23 @@ async function requestAccess(uid: number, chatId: number, firstName?: string, us
 // ---- Создать конфиг ----
 async function beginNew(uid: number, chatId: number) {
   if (!isAllowed(uid)) return sendMessage(chatId, "⛔ Нет доступа.");
-  setState(chatId, { mode: "waiting_new_name", uid });
-  return sendMessage(chatId, "✏️ Введи **название конфига** (например: iPhone, Ноутбук):", { parse_mode: "Markdown" });
+  return askProtoFirst(uid, chatId);
 }
-// После ввода имени — спросить протокол
-async function askProto(uid: number, chatId: number, name: string, targetUid?: number) {
-  setState(chatId, { mode: "waiting_proto", uid, name, targetUid });
-  return sendMessage(chatId, `🔧 Выбери протокол для конфига «${name}»:`, {
+// Шаг 1: выбор протокола, затем спросим имя
+async function askProtoFirst(uid: number, chatId: number, targetUid?: number) {
+  setState(chatId, { mode: "waiting_new_proto", uid, targetUid });
+  return sendMessage(chatId, "🔧 Выбери протокол:", {
     reply_markup: { inline_keyboard: [
-      [{ text: "🛡 WireGuard (основной)", callback_data: `proto:wireguard` }],
+      [{ text: "🛡 AmneziaWG (основной)", callback_data: `proto:wireguard` }],
       [{ text: "🔒 Shadowsocks (для белых списков)", callback_data: `proto:shadowsocks` }],
     ] },
   });
+}
+// Шаг 2: протокол выбран, ждём имя и сразу создаём
+async function askName(uid: number, chatId: number, proto: string, targetUid?: number) {
+  setState(chatId, { mode: "waiting_new_name", uid, name: undefined, targetUid, proto });
+  const label = proto === "shadowsocks" ? "🔒 Shadowsocks" : "🛡 AmneziaWG";
+  return sendMessage(chatId, `✏️ Введи **название конфига** (${label}), например: iPhone, Ноутбук:`, { parse_mode: "Markdown" });
 }
 async function createConfig(uid: number, chatId: number, name: string, targetUid?: number, proto?: string) {
   const owner = targetUid ?? uid;
@@ -488,7 +497,7 @@ async function showProtoMenu(chatId: number, targetId: number) {
     return sendMessage(chatId, `У ${label} нет конфигов.`);
   }
   const kb: any[] = [];
-  if (wg.length) kb.push([{ text: `🛡 WireGuard (${wg.length})`, callback_data: `protolist:${targetId}:wg` }]);
+  if (wg.length) kb.push([{ text: `🛡 AmneziaWG (${wg.length})`, callback_data: `protolist:${targetId}:wg` }]);
   if (ss.length) kb.push([{ text: `🔒 Shadowsocks (${ss.length})`, callback_data: `protolist:${targetId}:ss` }]);
   return sendMessage(chatId, "📋 Выбери протокол:", { reply_markup: { inline_keyboard: kb } });
 }
@@ -499,7 +508,7 @@ async function showProtoConfigs(chatId: number, targetId: number, proto: string)
   const filtered = his.filter(([n, c]: any) => (proto === "ss") === (c.proto === "shadowsocks"));
   if (!filtered.length) return sendMessage(chatId, "Конфигов этого типа нет.");
   const kb = filtered.map(([name]) => [{ text: `📦 ${name}`, callback_data: `conf:${name}` }]);
-  const title = proto === "ss" ? "🔒 Shadowsocks" : "🛡 WireGuard";
+  const title = proto === "ss" ? "🔒 Shadowsocks" : "🛡 AmneziaWG";
   return sendMessage(chatId, `${title}:\nВыбери конфиг:`, { reply_markup: { inline_keyboard: kb } });
 }
 // ---- Меню конфига ----
@@ -542,7 +551,7 @@ async function handleText(uid: number, chatId: number, text: string, firstName?:
     const clean = text.replace(/[^A-Za-zА-Яа-яЁё0-9 _\-]/g, "").trim();
     if (!clean || clean.length > 40) { clearState(chatId); return sendMessage(chatId, "❌ Некорректное имя. Нажми «➕ Создать конфиг» чтобы попробовать снова."); }
     if (getClients()[clean]) { clearState(chatId); return sendMessage(chatId, `❌ Конфиг «${clean}» уже существует. Нажми «➕ Создать конфиг» и введи другое имя.`); }
-    return askProto(uid, chatId, clean, st.uid);
+    return createConfig(uid, chatId, clean, st.uid, st.proto);
   }
   // Состояние: ждём пользователя для добавления
   if (st.mode === "waiting_add_user") {
@@ -695,11 +704,11 @@ async function handleUpdate(upd: any) {
     // Выбор протокола при создании нового конфига
     if (action === "proto") {
       const st = getState(chatId);
-      if (st.mode !== "waiting_proto" || !st.name) return answerCb(cq.id, "⛔ Заверши создание конфига");
+      if (st.mode !== "waiting_new_proto") return answerCb(cq.id, "⛔ Заверши создание конфига");
       const stUid = st.targetUid ?? st.uid;
-      await answerCb(cq.id, "Создаю...");
+      await answerCb(cq.id);
       try { await api("deleteMessage", { chat_id: chatId, message_id: cq.message.message_id }); } catch {}
-      return createConfig(st.uid, chatId, st.name, stUid, arg);
+      return askName(st.uid, chatId, arg, stUid);
     }
     if (action === "confuser" && uid === ADMIN_ID) {
       const t = arg === "admin" ? ADMIN_ID : Number(arg);
@@ -721,8 +730,8 @@ async function handleUpdate(upd: any) {
     }
     if (action === "adduser" && uid === ADMIN_ID) return beginAddUser(chatId);
     if (action === "addconf" && uid === ADMIN_ID) {
-      setState(chatId, { mode: "waiting_new_name", uid: Number(arg) });
-      return sendMessage(chatId, `✏️ Введи название конфига для пользователя:`);
+      await answerCb(cq.id);
+      return askProtoFirst(uid, chatId, Number(arg));
     }
     if (action === "deluser" && uid === ADMIN_ID) {
       const targetId = Number(arg);
@@ -761,7 +770,7 @@ async function setCommands() {
 // ---- Main ----
 async function main() {
   console.log("Bot v3 started. Admin:", ADMIN_ID, "WG host:", WG_HOST);
-  const check = sshRun(`wg show wg0 public-key`);
+  const check = sshRun(`awg show awg0 public-key`);
   if (check.ok) console.log("SSH OK");
   else console.error("SSH FAIL", check.out);
   await setCommands();
