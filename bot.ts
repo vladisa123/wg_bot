@@ -239,8 +239,12 @@ function removePeerRemote(name: string, pub?: string): boolean {
   return remoteApply();
 }
 function nextFreeIp(clients: Record<string, any>): string {
+  // Занятые IP: из clients.json + реально живые пиры на сервере.
+  // Без второго источника можно выдать IP, который уже занят пиром,
+  // которого нет в базе (например, после чистки clients.json).
   const used = new Set<number>([1]);
   for (const c of Object.values(clients)) { const l = Number(c.ip?.split(".")[3]); if (!isNaN(l)) used.add(l); }
+  for (const p of readPeersFromMemory()) { const l = Number(p.ip.split(".")[3]); if (!isNaN(l)) used.add(l); }
   for (let i = 2; i < 255; i++) if (!used.has(i)) return `10.77.77.${i}`;
   throw new Error("Нет свободных IP");
 }
