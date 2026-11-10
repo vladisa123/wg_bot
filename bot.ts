@@ -19,6 +19,8 @@ const WHITELIST_FILE = `${DATA_DIR}/whitelist.json`;
 const CLIENTS_FILE = `${DATA_DIR}/clients.json`;
 const NAMES_FILE = `${DATA_DIR}/names.json`;
 const REQUESTS_FILE = `${DATA_DIR}/requests.json`;
+const TICKETS_FILE = `${DATA_DIR}/tickets.json`;
+const TICKET_SEQ_FILE = `${DATA_DIR}/ticket_seq.json`;
 const SERVER_PUBKEY = Deno.env.get("WG_SERVER_PUB") ?? "oq6RmahE4n2jwaRXDTe2g6Bbo4lGpaw1/i7VlkAiHkM=";
 const PSK = Deno.env.get("WG_PSK") ?? "";
 
@@ -35,7 +37,7 @@ function ssLink(name: string): string {
 function protoLabel(proto?: string): string { return proto === "shadowsocks" ? "🔒 Shadowsocks (белые списки)" : "🛡 AmneziaWG"; }
 
 // ---- Состояния (чат -> {mode}) ----
-// mode: none | waiting_new_proto | waiting_new_name | waiting_add_user | waiting_admin_msg
+// mode: none | waiting_new_proto | waiting_new_name | waiting_add_user | waiting_admin_msg | waiting_ticket_text | waiting_ticket_reply
 // waiting_new_proto: { mode, uid, targetUid } — выбран протокол, ждём имя
 // waiting_new_name: { mode, uid, targetUid, proto }
 // Для waiting_add_user: { mode }
@@ -109,6 +111,14 @@ function setWhitelist(l: number[]) { writeJson(WHITELIST_FILE, l); }
 // Заявки на доступ: { [chatId]: { id, name, username, ts } }
 function getRequests(): Record<string, any> { return readJson(REQUESTS_FILE, {}); }
 function setRequests(r: Record<string, any>) { writeJson(REQUESTS_FILE, r); }
+function getTickets(): Record<string, any> { return readJson(TICKETS_FILE, {}); }
+function setTickets(t: Record<string, any>) { writeJson(TICKETS_FILE, t); }
+function nextTicketId(): number {
+  const cur = readJson(TICKET_SEQ_FILE, { n: 1000 });
+  const n = Number(cur.n) + 1;
+  writeJson(TICKET_SEQ_FILE, { n });
+  return n;
+}
 function getClients(): Record<string, any> { return readJson(CLIENTS_FILE, {}); }
 function setClients(c: Record<string, any>) { writeJson(CLIENTS_FILE, c); }
 function getUserName(id: number): string {
@@ -318,16 +328,16 @@ const HELP_TEXT = `❓ *ПОМОЩЬ*
 Напиши админу: @vladisa_s`;
 
 const HELP_KB = {
-  inline_keyboard: [[{ text: "✉️ Написать админу", url: "https://t.me/vladisa_s" }]],
+  inline_keyboard: [[{ text: "✉️ Написать админу (тикет)", callback_data: "newticket" }]],
 };
 
 const MAIN_MENU = {
-  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["✉️ Сообщение"], ["📡 Telegram-прокси"], ["❓ Помощь", "⚠️ Важно"]] ,
+  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["✉️ Сообщение"], ["📡 Telegram-прокси"], ["❓ Помощь", "🆘 Поддержка"], ["⚠️ Важно"]] ,
   resize_keyboard: true, is_persistent: true,
 };
 // Юзер: без «Пользователи» (только свои конфиги и создание)
 const USER_MENU = {
-  keyboard: [["📋 Конфиги"], ["➕ Создать конфиг"], ["📡 Telegram-прокси"], ["❓ Помощь", "⚠️ Важно"]],
+  keyboard: [["📋 Конфиги"], ["➕ Создать конфиг"], ["📡 Telegram-прокси"], ["❓ Помощь", "🆘 Поддержка"], ["⚠️ Важно"]],
   resize_keyboard: true, is_persistent: true,
 };
 
@@ -460,6 +470,38 @@ async function showUsers(uid: number, chatId: number) {
     ] },
   });
 }
+// ---- Тикеты поддержки ----
+async function beginTicket(uid: number, chatId: number) {
+  if (!isAllowed(uid)) return sendMessage(chatId, "⛔ Нет доступа.");
+  setState(chatId, { mode: "waiting_ticket_text", uid });
+  return sendMessage(chatId, "🆘 *Опиши проблему* одним сообщением.\n\nЧто случилось, на каком устройстве, что уже пробовал. /cancel — отмена.", { parse_mode: "Markdown" });
+}
+async function createTicket(uid: number, chatId: number, text: string, username?: string) {
+  const id = nextTicketId();
+  const tickets = getTickets();
+  tickets[String(id)] = { id, user_id: uid, user_name: getUserName(uid), username: username ?? "", text, created: Date.now(), status: "open" };
+  setTickets(tickets);
+  await sendMessage(chatId, `✅ Обращение *#${id}* принято.\n\nАдмин ответит прямо здесь, в этом чате.`, { parse_mode: "Markdown", reply_markup: USER_MENU });
+  const adminBody = `🆘 <b>Тикет #${id}</b>\n👤 ${getUserName(uid)}${username ? " (@" + username + ")" : ""}\nID: ${uid}\n\n<i>${text}</i>`;
+  await api("sendMessage", { chat_id: ADMIN_ID, text: adminBody, parse_mode: "HTML", reply_markup: { inline_keyboard: [
+    [{ text: "💬 Ответить", callback_data: `treply:${id}` }],
+    [{ text: "✅ Закрыть", callback_data: `tclose:${id}` }],
+  ] } });
+  return true;
+}
+async function showTickets(uid: number, chatId: number) {
+  if (uid !== ADMIN_ID) return sendMessage(chatId, "⛔ Только админ.");
+  const tickets = Object.values(getTickets()).filter((t: any) => t.status === "open") as any[];
+  if (tickets.length === 0) return sendMessage(chatId, "🆘 Открытых тикетов нет.", { reply_markup: MAIN_MENU });
+  for (const t of tickets) {
+    await sendMessage(chatId, `🆘 <b>Тикет #${t.id}</b>\n👤 ${t.user_name}${t.username ? " (@" + t.username + ")" : ""}\nID: ${t.user_id}\n\n<i>${t.text}</i>`,
+      { parse_mode: "HTML", reply_markup: { inline_keyboard: [
+        [{ text: "💬 Ответить", callback_data: `treply:${t.id}` }],
+        [{ text: "✅ Закрыть", callback_data: `tclose:${t.id}` }],
+      ] } });
+  }
+}
+
 // Выбор получателя для сообщения от админа
 async function showMsgTargets(uid: number, chatId: number) {
   clearState(chatId);
@@ -624,6 +666,28 @@ async function handleText(uid: number, chatId: number, text: string, firstName?:
     return sendMessage(chatId, r.ok ? `✅ Отправлено: ${getUserName(st.targetId)}` : `❌ Не доставлено: ${getUserName(st.targetId)}`, { reply_markup: MAIN_MENU });
   }
 
+  // Пользователь описывает проблему -> создаём тикет
+  if (st.mode === "waiting_ticket_text") {
+    if (text.trim() === "/cancel") { clearState(chatId); return sendMessage(chatId, "Отменено.", { reply_markup: USER_MENU }); }
+    if (!text.trim()) return sendMessage(chatId, "Пустое сообщение. Опиши проблему или /cancel.");
+    clearState(chatId);
+    await createTicket(uid, chatId, text, username);
+    return;
+  }
+  // Админ отвечает на тикет
+  if (st.mode === "waiting_ticket_reply") {
+    if (text.trim() === "/cancel") { clearState(chatId); return sendMessage(chatId, "Отменено.", { reply_markup: MAIN_MENU }); }
+    if (!text.trim()) return sendMessage(chatId, "Пустой ответ. Напиши текст или /cancel.");
+    clearState(chatId);
+    const tickets = getTickets();
+    const t = tickets[String(st.ticketId)];
+    if (!t) return sendMessage(chatId, "❌ Тикет не найден.", { reply_markup: MAIN_MENU });
+    const r = await api("sendMessage", { chat_id: t.user_id, text: `💬 <b>Ответ по тикету #${t.id}</b>\n\n${text}`, parse_mode: "HTML" });
+    tickets[String(st.ticketId)].last_reply = Date.now();
+    setTickets(tickets);
+    return sendMessage(chatId, r.ok ? `✅ Ответ отправлен по тикету #${t.id}` : `❌ Не доставлено (тикет #${t.id})`, { reply_markup: MAIN_MENU });
+  }
+
   // Состояние: ждём название конфига
   if (st.mode === "waiting_new_name") {
     // Проверяем валидность имени заранее, затем спрашиваем протокол
@@ -665,6 +729,10 @@ async function handleText(uid: number, chatId: number, text: string, firstName?:
   if (text === "👥 Пользователи") return showUsers(uid, chatId);
   if (text === "✉️ Сообщение") return showMsgTargets(uid, chatId);
   if (text === "📋 Конфиги") return showConfigs(uid, chatId);
+  if (text === "🆘 Поддержка") {
+    if (uid === ADMIN_ID) return showTickets(uid, chatId);
+    return beginTicket(uid, chatId);
+  }
   if (text === "❓ Помощь") { clearState(chatId); return sendMessage(chatId, HELP_TEXT, { parse_mode: "Markdown", disable_web_page_preview: true, reply_markup: HELP_KB }); }
   if (text === "⚠️ Важно") { clearState(chatId); return sendMessage(chatId, INFO_TEXT, { parse_mode: "Markdown", disable_web_page_preview: true }); }
   if (text === "📡 Telegram-прокси") { clearState(chatId); return sendMessage(chatId, TELEGRAM_PROXY_TEXT, { parse_mode: "Markdown", reply_markup: TELEGRAM_PROXY_KB }); }
@@ -753,6 +821,27 @@ async function handleUpdate(upd: any) {
       return;
     }
     if (action === "user" && uid === ADMIN_ID) { await answerCb(cq.id); return showUserDetail(chatId, Number(arg)); }
+    if (action === "newticket") {
+      await answerCb(cq.id);
+      try { await api("deleteMessage", { chat_id: chatId, message_id: cq.message.message_id }); } catch {}
+      return beginTicket(uid, chatId);
+    }
+    if (action === "treply" && uid === ADMIN_ID) {
+      await answerCb(cq.id);
+      setState(chatId, { mode: "waiting_ticket_reply", ticketId: Number(arg) });
+      return sendMessage(chatId, `💬 Ответ на тикет #${arg}. Напиши текст или /cancel.`);
+    }
+    if (action === "tclose" && uid === ADMIN_ID) {
+      const tickets = getTickets();
+      if (!tickets[arg]) return answerCb(cq.id, "Тикет не найден");
+      tickets[arg].status = "closed";
+      tickets[arg].closed_at = Date.now();
+      setTickets(tickets);
+      await answerCb(cq.id, "Закрыт");
+      await api("sendMessage", { chat_id: tickets[arg].user_id, text: `✅ Обращение *#${arg}* закрыто.\n\nЕсли проблема осталась — создай новое через «🆘 Поддержка».`, parse_mode: "Markdown" });
+      try { await editMsg(chatId, cq.message.message_id, `✅ Тикет #${arg} закрыт.`); } catch { return sendMessage(chatId, `✅ Тикет #${arg} закрыт.`, { reply_markup: MAIN_MENU }); }
+      return;
+    }
     if (action === "msg" && uid === ADMIN_ID) {
       await answerCb(cq.id);
       setState(chatId, { mode: "waiting_admin_msg", targetId: Number(arg) });
