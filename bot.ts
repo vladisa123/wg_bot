@@ -35,7 +35,7 @@ function ssLink(name: string): string {
 function protoLabel(proto?: string): string { return proto === "shadowsocks" ? "🔒 Shadowsocks (белые списки)" : "🛡 AmneziaWG"; }
 
 // ---- Состояния (чат -> {mode}) ----
-// mode: none | waiting_new_proto | waiting_new_name | waiting_add_user
+// mode: none | waiting_new_proto | waiting_new_name | waiting_add_user | waiting_admin_msg
 // waiting_new_proto: { mode, uid, targetUid } — выбран протокол, ждём имя
 // waiting_new_name: { mode, uid, targetUid, proto }
 // Для waiting_add_user: { mode }
@@ -281,7 +281,7 @@ async function editMsg(chatId: number, msgId: number, text: string, extra: Recor
 // ---- Клавиатуры ----
 // Админ: все кнопки
 const MAIN_MENU = {
-  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["📡 Telegram-прокси"], ["⚠️ Важно"]] ,
+  keyboard: [["👥 Пользователи", "📋 Конфиги"], ["➕ Создать конфиг"], ["✉️ Сообщение"], ["📡 Telegram-прокси"], ["⚠️ Важно"]] ,
   resize_keyboard: true, is_persistent: true,
 };
 // Юзер: без «Пользователи» (только свои конфиги и создание)
@@ -425,6 +425,7 @@ async function showActiveUsers(uid: number, chatId: number) {
   const wl = getWhitelist().filter((id) => id !== ADMIN_ID);
   if (wl.length === 0) return sendMessage(chatId, "Активных пользователей пока нет.");
   const kb = wl.map((id) => [{ text: getUserName(id), callback_data: `user:${id}` }]);
+  kb.push([{ text: "✉️ Написать всем", callback_data: "msgall" }]);
   return sendMessage(chatId, "👥 Активные пользователи:", { reply_markup: { inline_keyboard: kb } });
 }
 // Список заявок на доступ
@@ -448,6 +449,7 @@ async function showUserDetail(chatId: number, targetId: number) {
   const kb: any[] = [];
   if (his.length) kb.push([{ text: "📦 Его конфиги", callback_data: `hisconf:${targetId}` }]);
   kb.push([{ text: "➕ Добавить конфиг", callback_data: `addconf:${targetId}` }]);
+  kb.push([{ text: "✉️ Написать сообщение", callback_data: `msg:${targetId}` }]);
   kb.push([{ text: "🗑 Удалить пользователя", callback_data: `deluser:${targetId}` }]);
   return sendMessage(chatId, `👤 ${name} (ID: ${targetId})\n\nКонфиги:\n${lines}`, { reply_markup: { inline_keyboard: kb } });
 }
@@ -544,6 +546,32 @@ async function showClientMenu(uid: number, chatId: number, name: string) {
 // ---- Обработка сообщений ----
 async function handleText(uid: number, chatId: number, text: string, firstName?: string, username?: string) {
   const st = getState(chatId);
+
+  // Админ пишет сообщение пользователю (или всем)
+  if (st.mode === "waiting_admin_msg") {
+    if (text.trim() === "/cancel") {
+      clearState(chatId);
+      return sendMessage(chatId, "Отменено.", { reply_markup: MAIN_MENU });
+    }
+    if (!text.trim()) return sendMessage(chatId, "Пустое сообщение. Напиши текст или /cancel.");
+    clearState(chatId);
+    const body = `📩 <b>Сообщение от админа</b>\n\n${text}`;
+    if (st.targetId === 0) {
+      const ids = getWhitelist().filter((id) => id !== ADMIN_ID);
+      let sent = 0;
+      const failed: string[] = [];
+      for (const id of ids) {
+        const r = await api("sendMessage", { chat_id: id, text: body, parse_mode: "HTML" });
+        if (r.ok) sent++;
+        else failed.push(getUserName(id));
+      }
+      let report = `✅ Отправлено: ${sent} из ${ids.length}`;
+      if (failed.length) report += `\n❌ Не доставлено: ${failed.join(", ")}`;
+      return sendMessage(chatId, report, { reply_markup: MAIN_MENU });
+    }
+    const r = await api("sendMessage", { chat_id: st.targetId, text: body, parse_mode: "HTML" });
+    return sendMessage(chatId, r.ok ? `✅ Отправлено: ${getUserName(st.targetId)}` : `❌ Не доставлено: ${getUserName(st.targetId)}`, { reply_markup: MAIN_MENU });
+  }
 
   // Состояние: ждём название конфига
   if (st.mode === "waiting_new_name") {
@@ -672,6 +700,16 @@ async function handleUpdate(upd: any) {
       return;
     }
     if (action === "user" && uid === ADMIN_ID) { await answerCb(cq.id); return showUserDetail(chatId, Number(arg)); }
+    if (action === "msg" && uid === ADMIN_ID) {
+      await answerCb(cq.id);
+      setState(chatId, { mode: "waiting_admin_msg", targetId: Number(arg) });
+      return sendMessage(chatId, `✉️ Напиши сообщение для ${getUserName(Number(arg))}.\n\nОно уйдёт как есть, с пометкой «от админа». /cancel — отмена.`);
+    }
+    if (action === "msgall" && uid === ADMIN_ID) {
+      await answerCb(cq.id);
+      setState(chatId, { mode: "waiting_admin_msg", targetId: 0 });
+      return sendMessage(chatId, "✉️ Напиши сообщение для ВСЕХ пользователей.\n\n/cancel — отмена.");
+    }
     if (action === "activeusers" && uid === ADMIN_ID) { await answerCb(cq.id); return showActiveUsers(uid, chatId); }
     if (action === "requests" && uid === ADMIN_ID) { await answerCb(cq.id); return showRequests(uid, chatId); }
     if (action === "approve" && uid === ADMIN_ID) {
