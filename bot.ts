@@ -419,6 +419,17 @@ async function showUsers(uid: number, chatId: number) {
     ] },
   });
 }
+// Выбор получателя для сообщения от админа
+async function showMsgTargets(uid: number, chatId: number) {
+  clearState(chatId);
+  if (uid !== ADMIN_ID) return sendMessage(chatId, "⛔ Только админ.");
+  const wl = getWhitelist().filter((id) => id !== ADMIN_ID);
+  if (wl.length === 0) return sendMessage(chatId, "Пользователей пока нет.");
+  const kb = wl.map((id) => [{ text: getUserName(id), callback_data: `msg:${id}` }]);
+  kb.push([{ text: "✉️ Написать всем", callback_data: "msgall" }]);
+  return sendMessage(chatId, "✉️ Кому написать?", { reply_markup: { inline_keyboard: kb } });
+}
+
 // Список активных (одобренных) пользователей
 async function showActiveUsers(uid: number, chatId: number) {
   if (uid !== ADMIN_ID) return sendMessage(chatId, "⛔ Только админ.");
@@ -449,7 +460,6 @@ async function showUserDetail(chatId: number, targetId: number) {
   const kb: any[] = [];
   if (his.length) kb.push([{ text: "📦 Его конфиги", callback_data: `hisconf:${targetId}` }]);
   kb.push([{ text: "➕ Добавить конфиг", callback_data: `addconf:${targetId}` }]);
-  kb.push([{ text: "✉️ Написать сообщение", callback_data: `msg:${targetId}` }]);
   kb.push([{ text: "🗑 Удалить пользователя", callback_data: `deluser:${targetId}` }]);
   return sendMessage(chatId, `👤 ${name} (ID: ${targetId})\n\nКонфиги:\n${lines}`, { reply_markup: { inline_keyboard: kb } });
 }
@@ -612,6 +622,7 @@ async function handleText(uid: number, chatId: number, text: string, firstName?:
   if (text === "/start" || text === "🏠 Главное меню") return showMain(uid, chatId, firstName, username);
   if (text === "➕ Создать конфиг") return beginNew(uid, chatId);
   if (text === "👥 Пользователи") return showUsers(uid, chatId);
+  if (text === "✉️ Сообщение") return showMsgTargets(uid, chatId);
   if (text === "📋 Конфиги") return showConfigs(uid, chatId);
   if (text === "⚠️ Важно") { clearState(chatId); return sendMessage(chatId, INFO_TEXT, { parse_mode: "Markdown", disable_web_page_preview: true }); }
   if (text === "📡 Telegram-прокси") { clearState(chatId); return sendMessage(chatId, TELEGRAM_PROXY_TEXT, { parse_mode: "Markdown", reply_markup: TELEGRAM_PROXY_KB }); }
